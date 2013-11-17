@@ -51,8 +51,8 @@ def build_docset():
         os.makedirs(contents_dir)
     shutil.copyfile(os.path.join(CURRENT_DIR, 'Info.plist'),
                     os.path.join(contents_dir, 'Info.plist'))
-    shutil.copyfile(os.path.join(CURRENT_DIR, 'icon.png'),
-                    os.path.join(docset_directory, 'icon.png'))
+    shutil.copyfile(os.path.join(CURRENT_DIR, 'icon.tif'),
+                    os.path.join(docset_directory, 'icon.tif'))
 
     resources_dir = os.path.join(contents_dir, 'Resources')
     html_sourcepath = os.path.join(BUILD_DIR, 'fabric', 'docs', '_build',
