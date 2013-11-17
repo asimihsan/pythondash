@@ -250,7 +250,7 @@ def generate_feed_xml_and_tarball(docset_path):
     xml_template = Template("""
 <entry>
     <version>${version}</version>
-    <url>https://github.com/asimihsan/pythondash/releases/download/fabric-${version}/Fabric.tgz</url>
+    <url>http://files.asimihsan.com/dash/Fabric.tgz</url>
 </entry>
     """)
     xml_contents = xml_template.substitute(version=GIT_CURRENT_TAG).strip()
