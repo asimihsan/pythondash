@@ -1,0 +1,269 @@
+#!/usr/bin/env python
+
+from sh import git, make, pip, tar
+from string import Template
+import argparse
+import bs4
+import os
+import re
+import shutil
+import sqlite3
+import sys
+
+CURRENT_DIR = os.path.abspath(os.path.dirname(__file__))
+BUILD_DIR = os.path.join(CURRENT_DIR, '_build')
+GIT_REPO = 'git@github.com:fabric/fabric.git'
+GIT_CURRENT_TAG = '1.8.0'
+
+git = git.bake(_out=sys.stdout)
+make = make.bake(_out=sys.stdout)
+pip = pip.bake(_out=sys.stdout)
+tar = tar.bake(_out=sys.stdout)
+
+
+def update_clone():
+    clone_path = os.path.join(BUILD_DIR, 'fabric')
+    if os.path.isdir(clone_path):
+        git.fetch(_cwd=clone_path)
+    else:
+        git.clone(GIT_REPO, 'fabric', _cwd=BUILD_DIR)
+    git.checkout('tags/%s' % GIT_CURRENT_TAG, _cwd=clone_path)
+
+
+def install_requirements():
+    clone_path = os.path.join(BUILD_DIR, 'fabric')
+    for filepath in ['requirements.txt', 'dev-requirements.txt']:
+        pip.install('-r', os.path.join(clone_path, filepath))
+
+
+def build_docs():
+    docs_path = os.path.join(BUILD_DIR, 'fabric', 'docs')
+    make('html', _cwd=docs_path)
+
+
+def build_docset():
+    docset_directory = os.path.join(BUILD_DIR, 'Fabric.docset')
+    if os.path.isdir(docset_directory):
+        shutil.rmtree(docset_directory)
+
+    contents_dir = os.path.join(docset_directory, 'Contents')
+    if not os.path.isdir(contents_dir):
+        os.makedirs(contents_dir)
+    shutil.copyfile(os.path.join(CURRENT_DIR, 'Info.plist'),
+                    os.path.join(contents_dir, 'Info.plist'))
+    shutil.copyfile(os.path.join(CURRENT_DIR, 'icon.png'),
+                    os.path.join(docset_directory, 'icon.png'))
+
+    resources_dir = os.path.join(contents_dir, 'Resources')
+    html_sourcepath = os.path.join(BUILD_DIR, 'fabric', 'docs', '_build',
+                                   'html')
+    html_destpath = os.path.join(resources_dir, 'Documents')
+    shutil.copytree(html_sourcepath, html_destpath)
+
+    dbpath = os.path.join(resources_dir, 'docSet.dsidx')
+    dbpath_directory = os.path.dirname(dbpath)
+    if not os.path.isdir(dbpath_directory):
+        os.makedirs(dbpath_directory)
+    db = sqlite3.connect(dbpath)
+    try:
+        cur = db.cursor()
+        cur.execute("""DROP TABLE IF EXISTS searchIndex;""")
+        cur.execute("""CREATE TABLE searchIndex(id INTEGER PRIMARY KEY,
+                                                name TEXT, type TEXT,
+                                                path TEXT);""")
+        cur.execute("""CREATE UNIQUE INDEX anchor ON searchIndex (name, type,
+                                                                  path);""")
+        remove_all_sidebars(html_destpath)
+        add_toc_anchors(html_destpath)
+        process_index(html_destpath, cur)
+        process_modules(html_destpath, cur)
+        add_env_variables(html_destpath, cur)
+    finally:
+        db.commit()
+        db.close()
+    return docset_directory
+
+
+def generate_html_filepaths(root_path):
+    for root, dirs, files in os.walk(root_path):
+        for name in files:
+            fullpath = os.path.join(root, name)
+            if os.path.splitext(fullpath)[-1] != '.html':
+                continue
+            yield fullpath
+
+
+def remove_all_sidebars(html_path):
+    rtd_css_source = os.path.join(CURRENT_DIR, 'rtd.css')
+    rtd_css_dest = os.path.join(html_path, '_static', 'rtd.css')
+    shutil.copyfile(rtd_css_source, rtd_css_dest)
+
+    for fullpath in generate_html_filepaths(html_path):
+        with open(fullpath) as f_in:
+            soup = bs4.BeautifulSoup(f_in.read())
+        soup.select('div.sphinxsidebar')[0].extract()
+        with open(fullpath, 'w') as f_out:
+            output = soup.prettify().encode('utf-8')
+            f_out.write(output)
+
+
+def add_toc_anchors(html_path):
+    """Note the undocumented feature that Dash will add Module anchors and
+    child Function anchors using the following scheme e.g.:
+
+        //apple_ref/cpp/Module/fabric.colors
+        //apple_ref/cpp/func/fabric.colors.blue
+
+    These anchors are used to generate the pretty table of contents when
+    you open up a module. Without these anchors the searching still works
+    but when you open up a module there is no pretty table of contents.
+    """
+
+    for fullpath in generate_html_filepaths(html_path):
+        with open(fullpath) as f_in:
+            soup = bs4.BeautifulSoup(f_in.read())
+
+        modules = (tag for tag in soup.select('div.section')
+                   if tag.attrs.get('id', '').startswith('module-'))
+        for module in modules:
+            module_name = module.attrs['id'].partition('module-')[-1]
+            anchor = soup.new_tag('a')
+            anchor.attrs['name'] = r'//apple_ref/cpp/Module/%s' % module_name
+            link = module.select('a.headerlink')[0]
+            link.parent.insert(0, anchor)
+
+        for block in soup.select('dl.function dt'):
+            function_name = block.attrs['id']
+            anchor = soup.new_tag('a')
+            anchor.attrs['name'] = r'//apple_ref/cpp/func/%s' % \
+                                   function_name
+            link = block.select('a.headerlink')[0]
+            link.parent.insert(0, anchor)
+
+        with open(fullpath, 'w') as f_out:
+            output = soup.prettify().encode('utf-8')
+            f_out.write(output)
+
+
+def process_index(html_path, cursor):
+    """Find all Guide links from the index page and add them to the database.
+    There are some modules linked from the index page that we do not add now.
+    Wait for 'process_modules' and add them as Modules instead.
+    """
+
+    with open(os.path.join(html_path, 'index.html')) as f_in:
+        soup = bs4.BeautifulSoup(f_in.read())
+    for link in soup.select('li a.reference.internal'):
+        link_html_path = os.path.join(html_path, link.attrs['href'])
+        if os.path.isfile(link_html_path):
+            with open(link_html_path) as f_in:
+                link_soup = bs4.BeautifulSoup(f_in.read())
+            if any(tag.attrs.get('id', '').startswith('module-')
+                   for tag in link_soup.select('div.section')):
+                continue
+        insert_into_db(cursor, link.text, 'Guide', link.attrs['href'])
+    for link in (link for link in soup.select('a.reference.internal')
+                 if any(text in link.text for text in ['FAQ', 'Tutorial'])):
+        insert_into_db(cursor, link.text, 'Guide', link.attrs['href'])
+
+
+def process_modules(html_path, cursor):
+    """Look in all HTML files and identify modules and add them as Modules,
+    with all their functions as Functions. Dash will then index these modules
+    nicely with headings etc.
+    """
+
+    for fullpath in generate_html_filepaths(html_path):
+        with open(fullpath) as f_in:
+            soup = bs4.BeautifulSoup(f_in.read())
+        if not any(tag.attrs.get('id', '').startswith('module-')
+                   for tag in soup.select('div.section')):
+            continue
+        html_relpath = fullpath.partition(html_path)[-1][1:]
+        module_link_object = soup.select('div.section')[0]
+        module_link = "%s%s" % (html_relpath,
+                                module_link_object
+                                .select('h1 a.headerlink')[0]
+                                .attrs['href'])
+        module_name = module_link_object.attrs['id'] \
+            .partition('module-')[-1]
+        insert_into_db(cursor, module_name, 'Module', module_link)
+        for block in soup.select('dl.function dt'):
+            function_name = block.attrs['id']
+            function_link_object = block.select('a.headerlink')[0]
+            function_link = "%s%s" % (html_relpath,
+                                      function_link_object.attrs['href'])
+            insert_into_db(cursor, function_name, 'func',
+                           function_link)
+
+
+def add_env_variables(html_path, cursor):
+    """Unique to Fabric is a very large number of variables that can be
+    set either directly in the environment module (e.g. env.foo = bar) or
+    via a settings context manager (e.g. with settings(foo=bar)). Let's
+    index them as Variables."""
+
+    for fullpath in generate_html_filepaths(html_path):
+        with open(fullpath) as f_in:
+            soup = bs4.BeautifulSoup(f_in.read())
+        section = [elem for elem in soup.select('div.section')
+                   if elem.attrs.get('id', '') == 'full-list-of-env-vars']
+        if len(section) == 0:
+            continue
+        section = section[0]
+        html_relpath = fullpath.partition(html_path)[-1][1:]
+        for block in section.select('div.section'):
+            var_name = "env.%s" % \
+                strip_spaces(block.select('h3 tt.docutils.literal')[0].text)
+            var_link = "%s%s" % (html_relpath,
+                                 block.select('a.headerlink')[0].attrs['href'])
+            insert_into_db(cursor, var_name, 'Variable', var_link)
+
+
+def insert_into_db(cursor, name, type, path):
+    name = strip_spaces(name)
+    cursor.execute("""INSERT OR IGNORE INTO searchIndex(name, type, path)
+                      VALUES (?, ?, ?);""", (name, type, path))
+
+
+def strip_spaces(input):
+    return re.sub('\s{2,}', ' ', input.strip())
+
+
+def generate_feed_xml_and_tarball(docset_path):
+    xml_template = Template("""
+<entry>
+    <version>${version}</version>
+    <url>http://files.asimihsan.com/dash/Fabric.tgz</url>
+</entry>
+    """)
+    xml_contents = xml_template.substitute(version=GIT_CURRENT_TAG).strip()
+    with open(os.path.join(BUILD_DIR, "Fabric.xml"), "w") as f_out:
+        f_out.write(xml_contents)
+    tar("--exclude='.DS_Store'", '-cvzf', 'Fabric.tgz', docset_path,
+        _cwd=BUILD_DIR)
+
+
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--clean', action='store_true', default=False,
+                        help='Delete build directory and start from scratch')
+    return parser.parse_args()
+
+
+def main():
+    args = parse_args()
+    if args.clean and os.path.isdir(BUILD_DIR):
+        shutil.rmtree(BUILD_DIR)
+    if not os.path.isdir(BUILD_DIR):
+        os.makedirs(BUILD_DIR)
+    update_clone()
+    install_requirements()
+    build_docs()
+    output_path = build_docset()
+    print('docset available at: %s' % output_path)
+    generate_feed_xml_and_tarball(output_path)
+
+
+if __name__ == '__main__':
+    sys.exit(main())
