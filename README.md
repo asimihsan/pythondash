@@ -2,6 +2,28 @@
 
 Dash docsets for various Python modules
 
+## How to generate the docsets
+
+```
+# You need pip. If you don't have it see:
+# http://www.pip-installer.org/en/latest/installing.html
+
+git clone git@github.com:asimihsan/pythondash.git
+cd pythondash
+
+# Create a new virtualenv using virtualenv (or use virtualenvwrapper's
+# mkvirtualenv)
+pip install virtualenv
+virtualenv pythondash
+source pythondash/bin/activate
+
+# Install required modules into your virtualenv
+pip install -r requirements.txt
+
+# Create e.g. the Fabric docset
+./fabric/build
+```
+
 ## Feed URLs
 
 -   [Fabric](http://docs.fabfile.org/): [http://files.asimihsan.com/dash/Fabric.xml](http://files.asimihsan.com/dash/Fabric.xml)
