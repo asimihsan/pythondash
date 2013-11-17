@@ -2,6 +2,10 @@
 
 Dash docsets for various Python modules
 
+## Feed URLs
+
+-   [Fabric](http://docs.fabfile.org/): [http://files.asimihsan.com/dash/Fabric.xml](http://files.asimihsan.com/dash/Fabric.xml)
+
 ## How to generate the docsets
 
 ```
@@ -23,10 +27,6 @@ pip install -r requirements.txt
 # Create e.g. the Fabric docset
 ./fabric/build
 ```
-
-## Feed URLs
-
--   [Fabric](http://docs.fabfile.org/): [http://files.asimihsan.com/dash/Fabric.xml](http://files.asimihsan.com/dash/Fabric.xml)
 
 ## License
 
