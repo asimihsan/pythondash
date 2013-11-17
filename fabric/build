@@ -67,8 +67,8 @@ def build_docset():
         os.makedirs(contents_dir)
     shutil.copyfile(os.path.join(CURRENT_DIR, 'Info.plist'),
                     os.path.join(contents_dir, 'Info.plist'))
-    shutil.copyfile(os.path.join(CURRENT_DIR, 'icon.tif'),
-                    os.path.join(docset_directory, 'icon.tif'))
+    shutil.copyfile(os.path.join(CURRENT_DIR, 'icon.tiff'),
+                    os.path.join(docset_directory, 'icon.tiff'))
 
     resources_dir = os.path.join(contents_dir, 'Resources')
     html_sourcepath = os.path.join(BUILD_DIR, 'fabric', 'docs', '_build',
@@ -142,17 +142,20 @@ def add_toc_anchors(html_path):
         modules = (tag for tag in soup.select('div.section')
                    if tag.attrs.get('id', '').startswith('module-'))
         for module in modules:
-            module_name = module.attrs['id'].partition('module-')[-1]
+            module_name = module.attrs['id'].partition('module-')[-1] \
+                          .split(".")[-1]
             anchor = soup.new_tag('a')
             anchor.attrs['name'] = r'//apple_ref/cpp/Module/%s' % module_name
+            anchor.attrs['class'] = 'dashAnchor'
             link = module.select('a.headerlink')[0]
             link.parent.insert(0, anchor)
 
         for block in soup.select('dl.function dt'):
-            function_name = block.attrs['id']
+            function_name = block.attrs['id'].split(".")[-1]
             anchor = soup.new_tag('a')
             anchor.attrs['name'] = r'//apple_ref/cpp/func/%s' % \
                                    function_name
+            anchor.attrs['class'] = 'dashAnchor'
             link = block.select('a.headerlink')[0]
             link.parent.insert(0, anchor)
 
@@ -202,10 +205,10 @@ def process_modules(html_path, cursor):
                                 .select('h1 a.headerlink')[0]
                                 .attrs['href'])
         module_name = module_link_object.attrs['id'] \
-            .partition('module-')[-1]
+            .partition('module-')[-1].split(".")[-1]
         insert_into_db(cursor, module_name, 'Module', module_link)
         for block in soup.select('dl.function dt'):
-            function_name = block.attrs['id']
+            function_name = block.attrs['id'].split(".")[-1]
             function_link_object = block.select('a.headerlink')[0]
             function_link = "%s%s" % (html_relpath,
                                       function_link_object.attrs['href'])
