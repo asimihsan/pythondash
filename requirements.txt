@@ -8,7 +8,7 @@ docutils==0.11
 ecdsa==0.10
 fudge==0.9.6
 ipdb==0.8
-ipython==1.1.0
+ipython==7.16.3
 nose==1.3.0
 -e git+https://github.com/paramiko/paramiko@a9a5f69c1affae60fd3c390927e0389325f719a1#egg=paramiko-dev
 pycrypto==2.6.1
